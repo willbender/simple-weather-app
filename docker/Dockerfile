@@ -1,15 +1,14 @@
 # Multi-stage build for Weather Service with nginx
 
 # Stage 1: Build the Python application
-FROM python:3.11-alpine AS python-app
+FROM python:3.12-alpine AS python-app
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies and apply security updates
+RUN apk update && apk upgrade && \
+    apk add --no-cache gcc musl-dev
 
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
@@ -22,7 +21,8 @@ COPY src/main.py .
 COPY src/run_server.py .
 
 # Create non-root user for security
-RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
+RUN adduser --disabled-password --gecos "" --no-create-home --shell /bin/sh app && \
+    chown -R app:app /app
 USER app
 
 # Expose port 8000 for the FastAPI application
@@ -32,7 +32,10 @@ EXPOSE 8000
 CMD ["python", "-c", "import uvicorn; from main import app; uvicorn.run('main:app', host='0.0.0.0', port=8000, log_level='info')"]
 
 # Stage 2: nginx reverse proxy
-FROM nginx:alpine AS nginx-proxy
+FROM nginx:1.27-alpine AS nginx-proxy
+
+# Apply security updates
+RUN apk update && apk upgrade
 
 # Remove default nginx configuration
 RUN rm /etc/nginx/conf.d/default.conf
@@ -44,14 +47,16 @@ COPY docker/nginx.conf /etc/nginx/conf.d/
 EXPOSE 80
 
 # Stage 3: Final multi-service container
-FROM python:3.10-slim
+FROM python:3.12-slim-bookworm
 
-# Install nginx and supervisor to manage multiple processes
-RUN apt-get update && apt-get install -y \
+# Install nginx and supervisor to manage multiple processes, and apply security updates
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     gcc \
     nginx \
     supervisor \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
